@@ -1,115 +1,179 @@
 #include <stdio.h>
-#include <stdbool.h>
+#include <string.h>
+#include <stdlib.h>
 
-#define SIZE 7
-#define TOTAL_PINOS 32
+#define OUTPUT_FILE "passo-a-passo.txt"
 
-// Definição do tabuleiro inicial
-// -1: Inválido, 1: Pino, 0: Vazio
-int tabuleiro[SIZE][SIZE] = {
-    {-1, -1,  1,  1,  1, -1, -1},
-    {-1, -1,  1,  1,  1, -1, -1},
-    { 1,  1,  1,  1,  1,  1,  1},
-    { 1,  1,  1,  0,  1,  1,  1},
-    { 1,  1,  1,  1,  1,  1,  1},
-    {-1, -1,  1,  1,  1, -1, -1},
-    {-1, -1,  1,  1,  1, -1, -1}
-};
+static FILE *out;
 
-// Estrutura para armazenar o histórico de movimentos
+/*
+ * Resta Um - Peg Solitaire
+ * Tabuleiro 9x9 onde '#' = fora, 'o' = pino, ' ' = vazio
+ *
+ * Layout do tabuleiro (índices 0-8):
+ *   colunas válidas nas linhas 0,1,7,8: apenas cols 3,4,5
+ *   colunas válidas nas linhas 2-6: cols 1..7
+ *   (mas representamos tudo em 9x9, usando '#' nas bordas)
+ */
+
+#define ROWS 9
+#define COLS 9
+#define MAX_MOVES 31
+
 typedef struct {
-    int r1, c1, r2, c2;
-} Movimento;
+    int ar, ac; /* posição A (peça que salta) */
+    int br, bc; /* posição B (peça removida)  */
+    int cr, cc; /* posição C (destino vazio)  */
+} Move;
 
-Movimento passos[31];
-long int tentativas = 0;
+/* Estado do tabuleiro */
+char board[ROWS][COLS];
+Move history[MAX_MOVES];
+int move_count;
 
-//Função para exibir o tabuleiro 
-void imprimirTabuleiro() {
-    for (int i = 0; i < SIZE; i++) {
-        for (int j = 0; j < SIZE; j++) {
-            if (tabuleiro[i][j] == -1) printf("  ");
-            else printf("%d ", tabuleiro[i][j]);
-        }
-        printf("\n");
-    }
-    printf("\n");
+/* Inicializa o tabuleiro conforme o arquivo .out:
+ * '#' nas bordas inválidas, 'o' nos pinos, ' ' no centro (4,4)
+ */
+void init_board(void) {
+    int r, c;
+    /* Preenche tudo com '#' */
+    for (r = 0; r < ROWS; r++)
+        for (c = 0; c < COLS; c++)
+            board[r][c] = '#';
+
+    /* Linhas 1-7 (índices), colunas 3-5: zona superior/inferior do cruz */
+    /* Zona horizontal: linhas 3-5, colunas 1-7 */
+    /* Zona vertical:   linhas 1-7, colunas 3-5 */
+
+    for (r = 1; r <= 7; r++)
+        for (c = 3; c <= 5; c++)
+            board[r][c] = 'o';
+
+    for (r = 3; r <= 5; r++)
+        for (c = 1; c <= 7; c++)
+            board[r][c] = 'o';
+
+    /* Centro começa vazio */
+    board[4][4] = ' ';
+
+    move_count = 0;
 }
 
-//Verifica se a posição está dentro dos limites e é válida
-bool ehValido(int r, int c) {
-    return (r >= 0 && r < SIZE && c >= 0 && c < SIZE && tabuleiro[r][c] != -1);
+/* Imprime o tabuleiro */
+void print_board(void) {
+    int r, c;
+    for (r = 0; r < ROWS; r++) {
+        for (c = 0; c < COLS; c++)
+            fputc(board[r][c], out);
+        fputc('\n', out);
+    }
+    fputc('\n', out);
 }
 
-//Algoritmo: Backtracking
-bool resolver(int pinosRestantes) {
-    // Artifício para mostrar que o programa está rodando
-    tentativas++;
-    if (tentativas % 1000000 == 0) {
-        printf("Processando... Tentativas: %ld\r", tentativas);
+/* Conta pinos no tabuleiro */
+int count_pegs(void) {
+    int r, c, cnt = 0;
+    for (r = 0; r < ROWS; r++)
+        for (c = 0; c < COLS; c++)
+            if (board[r][c] == 'o')
+                cnt++;
+    return cnt;
+}
+
+/* Verifica se a célula é uma posição válida do tabuleiro (não é '#') */
+int valid_cell(int r, int c) {
+    if (r < 0 || r >= ROWS || c < 0 || c >= COLS) return 0;
+    return board[r][c] != '#';
+}
+
+/* Realiza o movimento: A salta sobre B para C */
+void do_move(Move m) {
+    board[m.ar][m.ac] = ' ';
+    board[m.br][m.bc] = ' ';
+    board[m.cr][m.cc] = 'o';
+}
+
+/* Desfaz o movimento */
+void undo_move(Move m) {
+    board[m.ar][m.ac] = 'o';
+    board[m.br][m.bc] = 'o';
+    board[m.cr][m.cc] = ' ';
+}
+
+/*
+ * Backtracking:
+ * Tenta realizar 31 movimentos para deixar apenas o pino central (4,4).
+ * Retorna 1 se encontrou solução, 0 caso contrário.
+ */
+int solve(int depth) {
+    if (depth == MAX_MOVES) {
+        /* Verifica se sobrou apenas o pino central */
+        if (board[4][4] == 'o' && count_pegs() == 1)
+            return 1;
+        return 0;
     }
 
-    // Condição de parada: Se resta apenas 1 pino
-    if (pinosRestantes == 1) {
-        // Verifica se o último pino está no centro (3,3)
-        return (tabuleiro[3][3] == 1);
-    }
+    int r, c, dr, dc;
+    /* Direções: horizontal e vertical */
+    int dirs[4][2] = {{0,1},{0,-1},{1,0},{-1,0}};
 
-    // Tenta mover cada pino em 4 direções
-    for (int r = 0; r < SIZE; r++) {
-        for (int c = 0; c < SIZE; c++) {
-            if (tabuleiro[r][c] == 1) {
-                
-                // Direções: Cima, Baixo, Esquerda, Direita
-                int dr[] = {-1, 1, 0, 0};
-                int dc[] = {0, 0, -1, 1};
+    for (r = 0; r < ROWS; r++) {
+        for (c = 0; c < COLS; c++) {
+            if (board[r][c] != 'o') continue;
+            int d;
+            for (d = 0; d < 4; d++) {
+                dr = dirs[d][0];
+                dc = dirs[d][1];
+                int br = r + dr,   bc = c + dc;
+                int cr = r + 2*dr, cc = c + 2*dc;
 
-                for (int i = 0; i < 4; i++) {
-                    int mr = r + dr[i];     // Posição do pino a ser "comido"
-                    int mc = c + dc[i];
-                    int fr = r + 2 * dr[i]; // Posição final (vazia)
-                    int fc = c + 2 * dc[i];
+                /* Posições B e C devem ser válidas */
+                if (!valid_cell(br, bc) || !valid_cell(cr, cc)) continue;
+                /* B deve ter pino, C deve estar vazio */
+                if (board[br][bc] != 'o') continue;
+                if (board[cr][cc] != ' ') continue;
 
-                    if (ehValido(fr, fc) && tabuleiro[mr][mc] == 1 && tabuleiro[fr][fc] == 0) {
-                        // Faz o movimento
-                        tabuleiro[r][c] = 0;
-                        tabuleiro[mr][mc] = 0;
-                        tabuleiro[fr][fc] = 1;
-                        
-                        passos[32 - pinosRestantes].r1 = r;
-                        passos[32 - pinosRestantes].c1 = c;
-                        passos[32 - pinosRestantes].r2 = fr;
-                        passos[32 - pinosRestantes].c2 = fc;
+                Move m = {r, c, br, bc, cr, cc};
+                do_move(m);
+                history[depth] = m;
 
-                        // Recursão
-                        if (resolver(pinosRestantes - 1)) return true;
+                if (solve(depth + 1))
+                    return 1;
 
-                        // Backtrack: Desfaz o movimento
-                        tabuleiro[r][c] = 1;
-                        tabuleiro[mr][mc] = 1;
-                        tabuleiro[fr][fc] = 0;
-                    }
-                }
+                undo_move(m);
             }
         }
     }
-    return false;
+    return 0;
 }
 
-int main() {
-    printf("Resolvendo Resta Um...\n");
-    
-    if (resolver(TOTAL_PINOS)) {
-        printf("\n\nSolucao encontrada com sucesso!\n");
-        printf("Sequencia de movimentos (Linha, Coluna):\n");
-        printf("----------------------------------------\n");
-        for (int i = 0; i < 31; i++) {
-            printf("%02d: (%d,%d) -> (%d,%d)\n", i + 1, 
-                   passos[i].r1, passos[i].c1, passos[i].r2, passos[i].c2);
-        }
-    } else {
-        printf("\nNao foi possivel encontrar uma solucao.\n");
+int main(void) {
+    out = fopen(OUTPUT_FILE, "w");
+    if (!out) {
+        fprintf(stderr, "Erro ao abrir arquivo %s\n", OUTPUT_FILE);
+        return 1;
+    }
+    printf("O processamento pode demorar alguns segundos...\n");
+    fprintf(out, "O processamento pode demorar alguns segundos...\n");
+
+    init_board();
+    print_board(); /* Estado inicial */
+
+    if (!solve(0)) {
+        fprintf(stderr, "Nenhuma solucao encontrada.\n");
+        fclose(out);
+        return 1;
     }
 
+    /* Reproduz a sequência de movimentos imprimindo o tabuleiro após cada um */
+    init_board();
+    int i;
+    for (i = 0; i < MAX_MOVES; i++) {
+        do_move(history[i]);
+        print_board();
+    }
+
+    fclose(out);
+    printf("Saida gravada em %s\n", OUTPUT_FILE);
     return 0;
 }
