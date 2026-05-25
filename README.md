@@ -1,4 +1,4 @@
-# Resta Um (Peg Solitaire) - Solucionador em C
+# Resta Um - Solucionador em C
 
 Este repositório contém a implementação em linguagem C de um solucionador automatizado para o clássico jogo de tabuleiro **Resta Um**, desenvolvido como parte dos requisitos práticos da disciplina de Análise de Algoritmos.
 
@@ -42,5 +42,3 @@ Abra o terminal na pasta do projeto e execute o comando abaixo para gerar o exec
 ```bash
 gcc restaum.c -o restaum
 
-```bash
-./restaum
