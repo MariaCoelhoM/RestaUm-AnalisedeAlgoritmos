@@ -34,7 +34,7 @@ O solucionador emprega uma estratégia de busca exaustiva estruturada:
 ## Como Compilar e Executar
 
 ### Pré-requisitos
-* Compilador GCC instalado no sistema (ou ambiente compatível como o GitHub Codespaces / Linux Terminal).
+* Compilador GCC instalado no sistema.
 
 ### Passo 1: Compilação
 Abra o terminal na pasta do projeto e execute o comando abaixo para gerar o executável:
